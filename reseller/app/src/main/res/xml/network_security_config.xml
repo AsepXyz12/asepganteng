@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext HTTP cuma diizinkan KHUSUS ke domain server panel kamu, bukan
+  ke semua domain (lebih aman daripada usesCleartextTraffic global).
+  Kalau server udah pindah ke HTTPS, hapus block ini + hapus
+  android:usesCleartextTraffic dari AndroidManifest.xml.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">server.szxennofficial.my.id</domain>
+    </domain-config>
+</network-security-config>
