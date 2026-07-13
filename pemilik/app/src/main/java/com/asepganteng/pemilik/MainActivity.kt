@@ -1,14 +1,18 @@
 package com.asepganteng.pemilik
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.ViewGroup
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 
@@ -18,9 +22,41 @@ class MainActivity : AppCompatActivity() {
     private lateinit var swipeRefresh: SwipeRefreshLayout
     private val targetUrl = "http://server.szxennofficial.my.id:3100/pemilik-x7fq2mz9wr3kd8"
 
+    // Dipakai buat nyambungin hasil pilih file/kamera (dari Activity lain)
+    // balik ke <input type="file"> di halaman web. WebView TIDAK bisa
+    // munculin file chooser sendiri -- wajib di-handle manual lewat
+    // WebChromeClient.onShowFileChooser + activity result launcher ini.
+    // Tanpa ini, tombol upload PP/post/foto di web diem aja gak respon.
+    private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        fileChooserLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val callback = fileUploadCallback
+            fileUploadCallback = null
+            if (callback == null) return@registerForActivityResult
+
+            if (result.resultCode != RESULT_OK || result.data == null) {
+                callback.onReceiveValue(null)
+                return@registerForActivityResult
+            }
+
+            val data = result.data
+            val uris: Array<Uri> = when {
+                data?.clipData != null -> {
+                    val clip = data.clipData!!
+                    Array(clip.itemCount) { i -> clip.getItemAt(i).uri }
+                }
+                data?.data != null -> arrayOf(data.data!!)
+                else -> emptyArray()
+            }
+            callback.onReceiveValue(if (uris.isEmpty()) null else uris)
+        }
 
         val root = FrameLayout(this)
         swipeRefresh = SwipeRefreshLayout(this)
@@ -32,6 +68,8 @@ class MainActivity : AppCompatActivity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             setSupportZoom(false)
+            allowFileAccess = true
+            mediaPlaybackRequiresUserGesture = false
         }
 
         webView.webViewClient = object : WebViewClient() {
@@ -46,6 +84,31 @@ class MainActivity : AppCompatActivity() {
                     false
                 } else {
                     false // ganti jadi true + startActivity(Intent(ACTION_VIEW)) kalau mau buka link luar di browser
+                }
+            }
+        }
+
+        // WAJIB buat <input type="file"> (upload PP/postingan/foto/video)
+        // bisa beneran buka file chooser Android.
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView,
+                filePathCallback: ValueCallback<Array<Uri>>,
+                fileChooserParams: FileChooserParams
+            ): Boolean {
+                fileUploadCallback?.onReceiveValue(null)
+                fileUploadCallback = filePathCallback
+
+                val intent = fileChooserParams.createIntent().apply {
+                    // Boleh multi-pilih kalau <input> web-nya punya atribut "multiple"
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+                return try {
+                    fileChooserLauncher.launch(intent)
+                    true
+                } catch (e: Exception) {
+                    fileUploadCallback = null
+                    false
                 }
             }
         }
