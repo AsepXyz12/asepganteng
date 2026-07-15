@@ -16,6 +16,42 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- ===== Ditambahkan untuk fitur Alarm Jadwal Sholat ===== -->
+
+    <!-- Android 13+ (API 33+) mewajibkan izin eksplisit ini sebelum app
+         boleh nampilin notifikasi apapun -- tanpa ini, showNotification
+         dari web/JS ATAU dari native bakal DIAM AJA gak muncul. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Lokasi GPS -- dipakai buat "mengunci" jadwal sholat ke daerah
+         device yang pakai, BUKAN input kota manual. FINE = presisi GPS,
+         COARSE = fallback jaringan seluler/wifi kalau GPS device mati. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Alarm presisi (native AlarmManager) supaya waktu adzan tetap
+         berdering TEPAT WAKTU walau app sudah ditutup total / HP di-doze
+         mode -- ini yang gak bisa dicapai cuma dari timer JS di web,
+         karena semua JS berhenti total begitu proses app di-kill. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Biar alarm bisa "membangunkan" CPU dari sleep tepat pas jam
+         sholat, dan device gak keburu masuk deep sleep sebelum notifikasi
+         sempat tampil. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Supaya alarm tetap ke-set ulang otomatis setelah HP di-restart
+         (kalau gak ada ini, alarm ilang tiap kali HP dinyalain ulang
+         sampai user buka manual App-nya lagi). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Dibutuhin buat notifikasi full-screen (alarm "bangunin" layar
+         terkunci) di Android 14+ (API 34+). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!-- ========================================================= -->
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -34,6 +70,39 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- ===== Komponen native Alarm Jadwal Sholat ===== -->
+
+        <!-- Menerima "dering" dari AlarmManager tepat pas jam sholat,
+             lalu nampilin notifikasi full-screen + suara, JALAN WALAU
+             APP SUDAH DITUTUP TOTAL (bukan cuma di-minimize). -->
+        <receiver
+            android:name=".PrayerAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Nge-set ulang semua alarm otomatis abis HP di-restart, biar
+             gak perlu buka app manual dulu abis restart baru alarm balik
+             aktif. -->
+        <receiver
+            android:name=".BootRestoreReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Activity full-screen yang muncul di ATAS layar terkunci pas
+             alarm bunyi (kayak alarm bawaan HP) -- munculin tombol
+             "Tandai Selesai" / "Tunda 5 menit". -->
+        <activity
+            android:name=".PrayerAlarmActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.AppRole" />
+
+        <!-- ================================================ -->
+
     </application>
 
     <queries>

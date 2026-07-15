@@ -1,10 +1,19 @@
 package com.asepganteng.reseller
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AlarmManager
+import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.ViewGroup
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -15,7 +24,10 @@ import android.widget.FrameLayout
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,9 +43,29 @@ class MainActivity : AppCompatActivity() {
     private var fileUploadCallback: ValueCallback<Array<Uri>>? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
 
+    // ===== Ditambahkan untuk fitur Alarm Jadwal Sholat =====
+
+    // Callback WebView buat izin lokasi (dipanggil pas web manggil
+    // navigator.geolocation.getCurrentPosition). Tanpa override
+    // onGeolocationPermissionsShowPrompt di WebChromeClient, WebView bakal
+    // nolak diam-diam semua permintaan lokasi dari JS.
+    private var geolocationCallback: GeolocationPermissions.Callback? = null
+    private var geolocationOrigin: String? = null
+
+    // Izin RUNTIME Android (POST_NOTIFICATIONS, lokasi) -- ini BEDA dari
+    // izin WebView di atas. Android 13+ butuh izin notifikasi runtime dari
+    // OS dulu SEBELUM WebView-level permission apapun ada gunanya.
+    private lateinit var runtimePermissionLauncher: ActivityResultLauncher<Array<String>>
+
+    private lateinit var prefs: SharedPreferences
+
+    // ========================================================
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        prefs = getSharedPreferences("prayer_alarm_prefs", Context.MODE_PRIVATE)
 
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
@@ -59,6 +91,13 @@ class MainActivity : AppCompatActivity() {
             callback.onReceiveValue(if (uris.isEmpty()) null else uris)
         }
 
+        // ===== Ditambahkan: minta izin runtime notifikasi + lokasi =====
+        runtimePermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { /* hasil ditangani otomatis lewat WebView permission callback berikutnya */ }
+        requestRuntimePermissionsIfNeeded()
+        // ================================================================
+
         val root = FrameLayout(this)
         swipeRefresh = SwipeRefreshLayout(this)
         webView = WebView(this)
@@ -72,6 +111,10 @@ class MainActivity : AppCompatActivity() {
             allowFileAccess = true
             mediaPlaybackRequiresUserGesture = false
         }
+
+        // ===== Jembatan JS <-> Kotlin buat alarm sholat native =====
+        webView.addJavascriptInterface(WebAppInterface(), "AndroidPrayerAlarm")
+        // =============================================================
 
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String) {
@@ -179,6 +222,39 @@ class MainActivity : AppCompatActivity() {
                     false
                 }
             }
+
+            // ===== Ditambahkan: izin GEOLOKASI untuk WebView =====
+            // Tanpa override ini, navigator.geolocation.getCurrentPosition()
+            // di prayer-alarm.js akan SELALU gagal/timeout di dalam WebView,
+            // walau app sudah punya izin ACCESS_FINE_LOCATION dari Android.
+            override fun onGeolocationPermissionsShowPrompt(
+                origin: String,
+                callback: GeolocationPermissions.Callback
+            ) {
+                val hasFineLocation = ContextCompat.checkSelfPermission(
+                    this@MainActivity, Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (hasFineLocation) {
+                    callback.invoke(origin, true, false)
+                } else {
+                    // Simpan callback, minta izin runtime dulu, baru di-invoke
+                    // lagi setelah user merespons dialog izin Android.
+                    geolocationCallback = callback
+                    geolocationOrigin = origin
+                    runtimePermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION))
+                }
+            }
+
+            // Izin notifikasi Web Notification API di dalam WebView (BEDA
+            // dari izin notifikasi Android runtime POST_NOTIFICATIONS --
+            // WebView punya lapisan izin sendiri buat JS Notification API).
+            override fun onPermissionRequest(request: PermissionRequest) {
+                runOnUiThread {
+                    request.grant(request.resources)
+                }
+            }
+            // ========================================================
         }
 
         swipeRefresh.setOnRefreshListener { webView.reload() }
@@ -188,6 +264,83 @@ class MainActivity : AppCompatActivity() {
 
         webView.loadUrl(targetUrl)
     }
+
+    // ===== Ditambahkan: minta izin Android runtime (bukan izin WebView) =====
+    private fun requestRuntimePermissionsIfNeeded() {
+        val toRequest = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                toRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            toRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
+        if (toRequest.isNotEmpty()) {
+            runtimePermissionLauncher.launch(toRequest.toTypedArray())
+        }
+
+        // Android 12+ (API 31+) mewajibkan user approve manual "Alarm &
+        // pengingat" lewat halaman Settings khusus -- gak bisa lewat
+        // dialog permission biasa. Kalau belum diizinkan, arahkan user
+        // ke halaman itu sekali (cukup sekali seumur install biasanya).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            if (!alarmManager.canScheduleExactAlarms()) {
+                try {
+                    startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                } catch (e: Exception) {
+                    // Beberapa OEM custom ROM gak selalu ada halaman ini -- jangan
+                    // sampai app crash kalau intent-nya gak ketemu.
+                }
+            }
+        }
+    }
+
+    /**
+     * Jembatan yang dipanggil dari JS lewat window.AndroidPrayerAlarm.xxx().
+     * Dipasang di prayer-alarm.js sebagai pelengkap opsional -- kalau
+     * window.AndroidPrayerAlarm ada (berarti jalan di dalam APK ini),
+     * jadwal & status aktivitas JUGA didaftarkan ke alarm native di sini,
+     * supaya tetap jalan walau app ditutup total. Kalau dibuka di browser
+     * biasa (bukan APK), interface ini otomatis tidak ada dan web tetap
+     * jalan pakai timer JS biasa seperti sebelumnya.
+     */
+    inner class WebAppInterface {
+
+        /** Dipanggil dari prayer-alarm.js setelah fetch jadwal sholat
+         * berhasil. scheduleJson formatnya sama seperti dikembalikan API:
+         * [{"key":"Fajr","label":"Subuh","time":"04:32"}, ...] */
+        @android.webkit.JavascriptInterface
+        fun schedulePrayerAlarms(scheduleJson: String) {
+            PrayerAlarmScheduler.scheduleFromJson(applicationContext, scheduleJson)
+        }
+
+        /** Dipanggil dari prayer-alarm.js tiap ada interaksi user (klik/
+         * scroll/sentuh) -- dipakai PrayerReminderScheduler buat nentuin
+         * device masih aktif dipakai atau sudah idle. */
+        @android.webkit.JavascriptInterface
+        fun reportUserActive() {
+            prefs.edit().putLong("last_interaction_at", System.currentTimeMillis()).apply()
+        }
+
+        /** Dipanggil dari prayer-alarm.js pas user klik "Tandai Selesai"
+         * di widget web -- supaya alarm native juga ikut berhenti, gak
+         * cuma yang di JS. */
+        @android.webkit.JavascriptInterface
+        fun markPrayerDone(prayerKey: String) {
+            PrayerReminderScheduler.cancelReminderLoop(applicationContext, prayerKey)
+        }
+    }
+    // ==========================================================================
 
     override fun onBackPressed() {
         if (webView.canGoBack()) {
