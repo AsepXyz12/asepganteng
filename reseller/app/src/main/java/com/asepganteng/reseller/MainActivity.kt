@@ -33,7 +33,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var swipeRefresh: SwipeRefreshLayout
-    private val targetUrl = "http://server.szxennofficial.my.id:3100/reseller"
+    private val targetUrl = PanelConfig.RESELLER_ENDPOINT
 
     // Dipakai buat nyambungin hasil pilih file/kamera (dari Activity lain)
     // balik ke <input type="file"> di halaman web. WebView TIDAK bisa
