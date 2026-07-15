@@ -110,6 +110,10 @@ class MainActivity : AppCompatActivity() {
             setSupportZoom(false)
             allowFileAccess = true
             mediaPlaybackRequiresUserGesture = false
+            // Wajib di-enable manual -- tanpa ini, navigator.geolocation di JS
+            // bakal gagal/reject walau app sudah punya izin ACCESS_FINE_LOCATION
+            // dari Android dan onGeolocationPermissionsShowPrompt sudah di-override.
+            setGeolocationEnabled(true)
         }
 
         // ===== Jembatan JS <-> Kotlin buat alarm sholat native =====
