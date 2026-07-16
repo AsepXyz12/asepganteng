@@ -7,6 +7,6 @@
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">server.szxennofficial.my.id</domain>
+        <domain includeSubdomains="true">assistantpanel.bypstar7.web.id</domain>
     </domain-config>
 </network-security-config>
