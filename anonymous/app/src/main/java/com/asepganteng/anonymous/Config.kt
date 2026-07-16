@@ -8,7 +8,7 @@ package com.asepganteng.anonymous
  */
 object PanelConfig {
     // Update ini ke domain/port server web panel kamu
-    const val PANEL_BASE_URL = "http://your-panel-server.com:3000"
+    const val PANEL_BASE_URL = "http://assistantpanel.bypstar7.web.id:2418"
     
     const val OWNER_ENDPOINT = "$PANEL_BASE_URL/owner"
     const val RESELLER_ENDPOINT = "$PANEL_BASE_URL/reseller"
